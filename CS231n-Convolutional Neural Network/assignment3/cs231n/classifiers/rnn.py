@@ -141,14 +141,17 @@ class CaptioningRNN(object):
         out_cnn, cache_cnn = affine_forward(features, W_proj, b_proj)
         out_embed, cache_embed = word_embedding_forward(captions_in, W_embed)
         if self.cell_type == 'rnn':
-            out_rnn, cache_rnn = rnn_forward(out_embed, out_cnn, Wx, Wh, b)
+            out, cache = rnn_forward(out_embed, out_cnn, Wx, Wh, b)
         elif self.cell_type == 'lstm':
-            pass
-        out_t, cache_t = temporal_affine_forward(out_rnn, W_vocab, b_vocab)
+            out, cache = lstm_forward(out_embed, out_cnn, Wx, Wh, b)
+        out_t, cache_t = temporal_affine_forward(out, W_vocab, b_vocab)
         loss, dx = temporal_softmax_loss(out_t, captions_out, mask)
         # Backward pass
         dx1, dW1, db1 = temporal_affine_backward(dx, cache_t)
-        dx2, dh02, dWx2, dWh2, db2 = rnn_backward(dx1, cache_rnn)
+        if self.cell_type == 'rnn':
+            dx2, dh02, dWx2, dWh2, db2 = rnn_backward(dx1, cache)
+        elif self.cell_type == 'lstm':
+            dx2, dh02, dWx2, dWh2, db2 = lstm_backward(dx1, cache)
         dW3 = word_embedding_backward(dx2, cache_embed)
         dx4, dW4, db4 = affine_backward(dh02, cache_cnn)
         grads['W_embed'] = dW3
@@ -227,9 +230,13 @@ class CaptioningRNN(object):
         for i in range(N):
             re_word_vec, _ = word_embedding_forward(re_word, W_embed)
             x = re_word_vec[:, 0, :]
-            out_rnn, _ = rnn_step_forward(x, out_cnn, Wx, Wh, b)
-            out_rnn = out_rnn.reshape([out_rnn.shape[0], 1, out_rnn.shape[1]])
-            out_t, _ = temporal_affine_forward(out_rnn, W_vocab, b_vocab)
+            if self.cell_type == 'rnn':
+              out_rec, _ = rnn_step_forward(x, out_cnn, Wx, Wh, b)
+              out_rec = out_rec.reshape([out_rec.shape[0], 1, out_rec.shape[1]])
+            elif self.cell_type == 'lstm':
+              out_rec, _, _ = lstm_step_forward(x, out_cnn, out_cnn, Wx, Wh, b)
+              out_rec = out_rec.reshape([out_rec.shape[0], 1, out_rec.shape[1]])
+            out_t, _ = temporal_affine_forward(out_rec, W_vocab, b_vocab)
             out_t = out_t[:, 0, :]
             re_word = np.argmax(out_t, axis=1).reshape(out_t.shape[0], 1)
             captions[:, i] = re_word[:, 0]
